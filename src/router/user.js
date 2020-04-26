@@ -1,14 +1,23 @@
 const express = require('express')
+
+const { sendWelcomeEmail,sendCancelEmail } = require('../emails/account')
+const auth = require('../middleware/Auth')
 const User = require('../models/users')
+const multer = require('multer')
+const sharp =  require('sharp')
+
 
 const router = new express.Router()
 
 router.post('/user',async (req,res)=>{
 	const user = new User(req.body)
-	console.log(req.body)
+	
 
 	try{
+		
 		 await user.save()
+		 sendWelcomeEmail(user.email,user.name)
+		 const token = await user.generateAuthToken()
 		 res.status(201).send(user)
 	}catch(e){
 		res.status(400).send(e)
@@ -23,49 +32,61 @@ router.post('/user',async (req,res)=>{
 	
 })
 
-router.get('/user', async(req,res)=>{
-		try{
-			const user = await User.find({})
-			res.status(200).send(user)
-		}catch(e){
-			res.status(500).send(e)
-		}
 
-	// User.find({}).then((users)=>{
+
+router.post('/user/login', async(req,res)=>{
+	try{
+
+		const user = await User.findByCredentials(req.body.email,req.body.password)
+		const token = await user.generateAuthToken()
+		
+		res.send({ user, token })
+
+	}catch(error){
+		res.status(400).send(error)
+	}
+})
+
+router.post('/user/logout', auth , async(req,res)=>{
+	try{
+
+		req.user.tokens = req.user.tokens.filter((token)=>{
+			return token.token !== req.token
+		})
+
+		await req.user.save()
+		res.send()
+
+	}catch(e){
+		res.status(500).send()
+	}
+})
+
+router.post('/user/logoutAll' , auth , async (req,res)=>{
+try{
+
+		req.user.tokens = []
+		await req.user.save()
+		res.send()
+	
+}catch(e){
+	res.status(500).send()
+}
+})
+
+router.get('/user/me', auth ,async(req,res)=>{
+		res.send(req.user)
+
+	// User.find({}).then((users)=>{c
 	// 	res.send(users)
 	// }).catch((e)=>{
 	// 	res.status(500).send()
 	// })
 })
 
-router.get('/user/:id', async(req,res)=>{
-	const _id = req.params.id
 
-	try{
-		const user = await User.findById(_id)
-		if(!user){
-			return res.status(404).send()
-		}
 
-		res.status(200).send(user)
-
-	}catch(e){
-		res.status(500).send(e)
-	}
-
-	// User.findById(_id).then((user)=>{
-	// 	if(!user){
-	// 		return res.status(404).send()
-	// 	}
-
-	// 	res.send(user)
-
-	// }).catch((e)=>{
-	// 	res.status(500).send()
-	// })
-} )
-
-router.patch('/user/:id',async(req,res) => {
+router.patch('/user/me', auth, async (req,res) => {
    	const updates = Object.keys(req.body)
 	const validOpration = ['name','password','email','age']
 	const isvaildOperation = updates.every((update)=>validOpration.includes(update))
@@ -74,40 +95,78 @@ router.patch('/user/:id',async(req,res) => {
 		return res.status(404).send({error:'Invaild attempt to Update'})
 	}
 	try{
-
-		const user = await User.findById(req.params.id)
-
-
 		updates.forEach((update) => {
-			user[update] = req.body[update]
+			req.user[update] = req.body[update]
 		})
 
-		await user.save()
-		// const update = await User.findByIdAndUpdate(req.params.id,req.body,{new:true,runValidators:true})
-		if(!user){
-			return res.status(404).send()
-		}
+		await req.user.save()
 
-		res.status(201).send(update)
+		return res.send(req.user)
+
+		
 	}catch(e){
 		res.status(400).send(e)
 	}
 })
 
 
-router.delete('/user/:id', async(req,res)=>{
+router.delete('/user/me',auth, async(req,res)=>{
 	try{
-		const user = await User.findByIdAndDelete(req.params.id)
-
-		if(!user){
-			return res.status(404).send()
-		}
-		res.status(200).send(user)
-
+		await req.user.remove()
+		sendCancelEmail(req.user.email,req.user.name)
+	 res.send(req.user)
 	}catch(e){
 		res.status(400).send(e)
 	}
 })
 
+const upload = multer({
+	// dest:'avatars',     This part is used when u hav to give a destination for a pic or a file to get saved but when storing in database no need to use this.
+	limits:{
+		fileSize:1000000
+	} ,
+	fileFilter(req,file,cb) {
+		if(!file.originalname.match(/\.(jpg|jpeg|png)$/)){
+			return cb(new Error('Please upload a Image!'))
+		}
+
+		cb(undefined,true)
+	}
+})
+router.post('/user/me/avatar',auth,upload.single('avatar'),async(req,res)=>{
+	const buffer = await sharp(req.file.buffer).resize({width:250,height:250}).png().toBuffer()
+	req.user.avatar = buffer
+	await req.user.save()
+	res.send()
+},(error,req,res,next)=>{
+	res.status(400).send({error: error.message})
+})
+
+router.delete('/user/me/avatar',auth,upload.single('avatar'),async(req,res)=>{
+	req.user.avatar = undefined
+	 await req.user.save()
+	res.send()
+
+},(error,req,res,next)=>{
+	res.status(400).send({error: error.message})
+})
+
+router.get('/user/:id/avatar',async (req,res)=>{
+	try{
+		 
+		const user = await  User.findById(req.params.id)
+		console.log('test')
+
+		if( !user || !user.avatar ){
+			throw new Error()
+		}
+
+		res.set('Content-Type','image/png')
+		res.send(user.avatar)
+
+	}catch(e){
+		res.status(404).send()
+	}
+})
 
 module.exports = router

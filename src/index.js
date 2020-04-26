@@ -7,13 +7,27 @@ const userRouter = require('./router/user')
 const taskRouter = require('./router/tasks')
 const app = express()
 
+// app.use((req,res,next)=>{
+// 	if(req.method === 'GET'){
+// 		res.send('Get request is diabled')
+// 	}else{
+// 		next()
+// 	}
+// })
+
+// app.use((req, res, next)=>{
+// 		res.status(503).send('Site is under maintanace! Please try again later :)')
+
+// })
+
+app.use(express.json())
 app.use(userRouter)
 app.use(taskRouter)
 
 
-const port = process.env.PORT || 3000
+const port = process.env.PORT 
 
-app.use(express.json())
+
 
 
 app.listen(port,()=>{
